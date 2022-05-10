@@ -12,21 +12,29 @@ const cartSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    groupId: {
+        type: String,
+        required: true
+    },
     productId: {
         type: String,
         required: true
     },
+    productName: String,
+    productImage: String,
+    desc: String,
+    price: Number,
     count: {
         type: Number,
-        required: true
+        required: true,
+        default: 1
     },
+    stockNum: Number,
     createdAt: {
         type: String,
-        default: now
     },
     updatedAt: {
         type: String,
-        default: now
     }
 },
 {

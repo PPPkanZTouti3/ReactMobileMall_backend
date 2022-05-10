@@ -3,11 +3,18 @@
  */
 // 1.引入mongoose
 const mongoose = require('mongoose')
-const now = require('../utils/dateUtils')
 
 // 2.字义Schema(描述文档结构)
 const orderProductSchema = new mongoose.Schema({
+    userId: {
+        type: String,
+        required: true
+    },
     orderId: {
+        type: String,
+        required: true
+    },
+    groupId: {
         type: String,
         required: true
     },
@@ -18,13 +25,14 @@ const orderProductSchema = new mongoose.Schema({
     cartId: String,
     price: Number,
     count: Number,
+    desc: String,
+    productName: String,
+    productImage: String,
     createdAt: {
         type: String,
-        default: now
     },
     updatedAt: {
         type: String,
-        default: now
     }
 }, {
     collection: 'order_product'

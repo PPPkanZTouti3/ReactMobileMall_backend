@@ -13,11 +13,19 @@ const CartModel = require('../models/CartModel')
 const ProductAttriModel = require('../models/ProductAttriModel')
 const GroupAttriModel = require('../models/GroupAttriModel')
 const GroupAttriValueModel = require('../models/GroupAttriValueModel')
+const OrderModel = require('../models/OrderModel')
+const OrderProductModel = require('../models/OrderProductModel')
+const CollectionModel = require('../models/CollectionModel')
+const UserProductModel = require('../models/UserProductModel')
+const HistoryModel = require('../models/HistoryModel')
 const RoleModel = require('../models/RoleModel')
 const now = require('../utils/dateUtils')
+const userProdUtils = require('../utils/userProdUtils')
+const { RecommendUserService } = require('../utils/CF')
 const prodFormatUtils = require('../utils/prodFormatUtils')
 const mongoose = require('mongoose')
-
+const alipaySdk = require('./alipaySdk')
+const axios = require('axios')
 // 得到路由器对象
 const router = express.Router()
 // console.log('router', router)
@@ -139,7 +147,7 @@ router.post('/register', (req, res) => {
 // 更新用户
 router.post('/user/updateInfo', (req, res) => {
   let user = req.body;
-  user.updatedAt = now;
+  user.updatedAt = now();
   const { _id, userName, phone, email } = user;
   console.log('user',user)
   UserModel.findOne({ userName }).then(item => {
@@ -239,7 +247,7 @@ router.post('/user/findPwd', (req, res) => {
 // 添加地址
 router.post('/addAddress', (req, res) => {
   let address = req.body;
-  address.updatedAt = now;
+  address.updatedAt = now();
   const { _id, isDefault } = address; //这里的id是用户id
   delete address._id;
   UserModel.findOne({ _id }).then(user => {
@@ -252,8 +260,8 @@ router.post('/addAddress', (req, res) => {
       {
         ...address,
         addressId: mongoose.Types.ObjectId(),
-        createdAt: now,
-        updatedAt: now
+        createdAt: now(),
+        updatedAt: now()
       }
     )
     user.save()
@@ -321,7 +329,7 @@ router.post('/updateAddress', (req, res) => {
       targetAddress[k] = address[k]
     }
     
-    targetAddress.updatedAt = now;
+    targetAddress.updatedAt = now();
     user.save();
   })
   .then(() => {
@@ -371,39 +379,6 @@ router.post('/deleteAddress', (req, res) => {
 //  根据groupId获取商品信息
 router.get('/getProdByGroupId', (req, res) => {
   const { _id } = req.query; 
-//   ProductModel.aggregate([
-//     {
-//       $lookup: {
-//         from: "product_attri",
-//         localField: "detailProduct.attri.attriId",
-//         foreignField: "_id",
-//         as: "attri"
-//       }
-//     },
-//     // {
-//     //   $group: {
-//     //     _id: '$_id',
-//     //     content_sum: {
-//     //       $sum: 1
-//     //     }
-//     //   }
-//     // }
-//     {
-//       $lookup: {
-//         from: "group_attri_value",
-//         localField: "attri.groupAttriValueId",
-//         foreignField: "_id",
-//         as: "attri2"
-//       }
-//     }
-//   ],function(err,docs){
-//     if(err){
-//         console.log(err)
-//         return;
-//     }
-//     console.log(JSON.stringify(docs))
-//     res.send({docs})
-// })
   
   ProductModel.findOne({ _id })
   .populate({
@@ -428,17 +403,662 @@ router.get('/getProdByGroupId', (req, res) => {
         code: 0,
         data
     })
+  })
 })
+
+// 获取购物车信息
+router.get('/getCart', (req, res) => {
+  const { userId } = req.query;
+  CartModel.find({ userId }).then(cart => {
+    res.send({
+      data: cart
+    })
+  })
+})
+
+// 添加至购物车
+router.post('/addToCart', (req, res) => {
+  const { groupId, productId, count, userId, score } = req.body;
+  UserProductModel.findOne({userId, groupId}).then(prod => {
+    prod.score += Number(score);
+    prod.updatedAt = now();
+    prod.save()
+  }).catch(() => {
+    UserProductModel.create({
+      groupId,
+      userId,
+      score:Number(score),
+      createdAt: now(),
+      updatedAt: now()
+    })
+  })
+  CartModel.findOne({productId, userId}).then(prod => {
+    prod.count += Number(count);
+    prod.updatedAt = now();
+    prod.save();
+    res.send({
+      status: 0,
+      msg: '添加成功'
+    })
+  }).catch(() => {
+    CartModel.create({
+      ...req.body,
+      createdAt: now(),
+      updated: now()
+    })
+    res.send({
+      status: 0,
+      msg: '添加成功'
+    })
+  })
+})
+
+router.post('/delCartProd', (req, res) => {
+  const { _ids } = req.body;
+  _ids.length && _ids.forEach(_id => {
+    CartModel.deleteOne({_id}).catch(err => {
+      return res.send({
+        status: 1,
+        msg: '删除异常'
+      })
+    })
+  })
+  res.send({
+    status: 0,
+    msg: '删除成功'
+  })
+})
+
+// 在线支付
+router.post('/pay', (req, res) => {
+
+})
+
+// 生成订单
+router.post('/addOrder', (req, res) => {
+  const {
+    orderId,
+    products,
+    userId,
+    addressId,
+    payStatus,
+    deliveryFee,
+    productPrice,
+    totalPrice,
+    payStartTime,
+    payEndTime,
+  } = req.body
+
+  try {
+    products.map(item => {
+      OrderProductModel.create({
+        userId,
+        orderId,
+        productId: item.skuId,
+        price: item.productPrice,
+        count: item.selectQuantity,
+        productName: item.productName,
+        productImage: item.productImage,
+        groupId: item.productId,
+        desc: item.skuStr,
+        createdAt: now(),
+        updatedAt: now()
+      })
+    })
+  
+    OrderModel.create({
+      orderId,
+      userId,
+      addressId,
+      payStatus,
+      payStartTime,
+      payEndTime,
+      deliveryFee,
+      productPrice,
+      totalPrice,
+      createdAt: now(),
+      updatedAt: now()
+    })
+  
+    res.send({
+      status: 0,
+      msg: '添加订单成功'
+    })
+  }
+  catch(err) {
+    res.send({
+      status: 1,
+      msg: '添加订单异常'
+    })
+  }
+  
+})
+
+// 取消订单
+router.post('/cancelOrder', (req, res) => {
+  const { orderId } = req.body;
+  OrderModel.deleteOne({ orderId }).then(() => {
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: '订单取消异常'
+    })
+  })
+  OrderProductModel.deleteMany({ orderId }).then(() => {
+    res.send({
+      status: 0,
+      msg: '订单取消成功'
+    })
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: '订单取消异常'
+    })
+  })
+  
+})
+
+// 获取订单信息
+router.get('/getOrderList', async (req, res) => {
+  const { userId } = req.query;
+  let order = await OrderModel.find({userId})
+  let data = {}
+  data = JSON.parse(JSON.stringify(order))
+  order.forEach(async (item, i) => {
+    let tmp = JSON.parse(JSON.stringify(item))
+    let products = await OrderProductModel.find({orderId: tmp.orderId})
+    products = JSON.parse(JSON.stringify(products))
+    
+    data[i].products = products;
+    if(i === order.length - 1) {
+      res.send({
+        status: 0,
+        data
+      })
+    }
+  })
+  
+})
+
+// 获取订单详情
+router.get('/getOrderDetail', async (req, res) => {
+  const { orderId } = req.query;
+  let order = await OrderModel.find({orderId})
+  let data = {}
+  data = JSON.parse(JSON.stringify(order))
+  order.forEach(async (item, i) => {
+    let tmp = JSON.parse(JSON.stringify(item))
+    let products = await OrderProductModel.find({orderId: tmp.orderId})
+    products = JSON.parse(JSON.stringify(products))
+    data[i].products = products;
+    if(i === order.length - 1) {
+      res.send({
+        status: 0,
+        data
+      })
+    }
+  })
+  
+})
+
+// 处理订单超时
+router.post('/setOrderOverTime', (req, res) => {
+  const { orderId } = req.body;
+
+  OrderModel.findOne({orderId}).then(item => {
+    item.isOverTime = 1;
+    item.save();
+    res.send({
+      status: 0,
+      msg: '订单超时处理成功'
+    })
+  })
+  .catch(err => {
+    res.send({
+      status: 1,
+      msg: '订单超时处理异常'
+    })
+  })
+})
+
+// 处理订单状态 为1
+router.post('/orderHasPayed', (req, res) => {
+  const { orderId } = req.body;
+  OrderModel.findOne({orderId}).then(order => {
+    order.payStatus = 1;
+    order.save();
+    res.send({
+      status: 0,
+      msg: '订单支付成功'
+    })
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: '订单支付异常'
+    })
+  })
+})
+
+// 购买成功后处理库存和销量
+router.post('/handleSalesAndStock', async (req, res) => {
+  const {productList} = req.body;
+  productList.length&&productList.map(async (item) => {
+    let product = await ProductModel.findOne({_id: item.productId});
+    // console.log(product)
+    product.sales += item.selectQuantity;
+    if(product.detailProduct && product.detailProduct.length){
+      product.detailProduct.map((prod) => {
+        if(prod._id.toString() === item.skuId) {
+          
+          prod.stockNum -= item.selectQuantity;
+          // prod.save();
+          // console.log(prod.stockNum, product.sales)
+          product.save();
+        }
+      })
+    }
+  })
+  res.send({
+    status: 0,
+    msg: '销量和库存修改成功'
+  })
+  
+})
+
+// 获取购物车列表
+router.get('/cartList', (req, res) => {
+  // // 跨域
+  // var reqOrigin = req.header("origin");
+ 
+  // if(reqOrigin !=undefined && reqOrigin.indexOf("http://localhost:3000") > -1){
+  // //设置允许 http://localhost:3000 这个域响应
+  //   res.header("Access-Control-Allow-Origin", "http://localhost:3000");
+  //   res.header("Access-Control-Allow-Methods","PUT,POST,GET,DELETE,OPTIONS");
+  //   res.header("Access-Control-Allow-Headers", "Content-Type,Content-Length, Authorization, Accept,X-Requested-With");
+  // }
+  // let data = JSON.parse(fs.readFileSync(path.join(__dirname,'../mock/cart.json'),'utf8'))
+  const {userId} = req.query
+  CartModel.find({userId}).then((item) => {
+    res.send({
+      data: item,
+      status: 0
+    })
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: '获取购物车列表异常'
+    })
+  })
+  
+})
+
+// 添加商品 用于mock
+router.post('/addProd', (req, res) => {
+  console.log(req.body)
+  req.body.list.map(item => {
+    ProductModel.create({
+      ...item,
+      createdAt: now(),
+      updatedAt: now(),
+    })
+  })
+  
+  res.send({
+    status: 0,
+    msg: 'success'
+  })
+    
+})
+
+// 搜索商品
+router.get('/searchProd', (req, res) => {
+  const { val } = req.query;
+  let reg = new RegExp(val, 'i');
+  ProductModel.find({
+    $or : [
+        {name : {$regex : reg}},
+        {tags : {$regex : reg}}
+    ]
+  },).then(data => {
+    res.send({
+      status: 0,
+      data
+    })
+  })
+  .catch(err => {
+    res.send({
+      status: 1,
+      msg: err
+    })
+  })
+})
+
+// 推荐模块 搜索商品
+router.post('/searchProdFunc', async (req, res) => {
+  const { val, score, userId } = req.body;
+  let reg = new RegExp(val, 'i');
+  let data = await ProductModel.find({
+    $or : [
+        {name : {$regex : reg}},
+        {tags : {$regex : reg}}
+    ]
+  },)
+  data && data.map(item => {
+    UserProductModel.findOne({userId, groupId: item.groupId}).then((prod) => {
+      prod.score += Number(score);
+      prod.updatedAt = now();
+      prod.save()
+      res.send({
+        msg: 'updated success'
+      })
+    }).catch(() => {
+      UserProductModel.create({
+        groupId: item.groupId,
+        userId,
+        score: Number(score),
+        createdAt: now(),
+        updatedAt: now()
+      })
+      res.send({
+        msg: 'created success'
+      })
+    })
+  })
+})
+
+// 获取用户收藏列表
+router.get('/collection', (req, res) => {
+  const {_id} = req.query;
+  CollectionModel.find({userId: _id}).populate('groupId').then(data => {
+    res.send({
+      status: 0,
+      data
+    })
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: err
+    })
+  })
+})
+
+// 添加至收藏夹
+router.post('/addToCollection', (req, res) => {
+  const { groupId, userId, score } = req.body;
+  CollectionModel.findOne({userId, groupId}).then(item => {
+    if(item) {
+      res.send({
+        status: 1,
+        msg: '该商品已收藏'
+      })
+      return false;
+    }
+    else {
+      UserProductModel.findOne({userId, groupId}).then((item) => {
+        item.score += Number(score);
+        item.updatedAt = now();
+        item.save()
+      }).catch(() => {
+        UserProductModel.create({
+          userId,
+          groupId,
+          score: Number(score),
+          createdAt: now(),
+          updatedAt: now()
+        })
+      })
+      CollectionModel.create({
+        groupId,
+        userId,
+        createdAt: now(),
+        updatedAt: now()
+      }).then(() => {
+        res.send({
+          status: 0,
+          msg: '添加至收藏夹成功'
+        })
+      }).catch(err => {
+        console.log(err)
+        res.send({
+          status: 1,
+          msg: '添加至收藏夹异常' + err
+        })
+      })
+    }
+  })
+})
+
+// 检查是否已经收藏
+router.get('/checkCollected', (req, res) => {
+  const {userId, groupId} = req.query;
+  CollectionModel.findOne({userId, groupId}).then(item => {
+    if(item) {
+      res.send({
+        status: 0,
+        data: 1
+      })
+    }
+    else {
+      res.send({
+        status: 0,
+        data: 0
+      })
+    }
+  }).catch(err => {
+    res.send({
+      status: 0,
+      msg: '查询是否收藏异常'
+    })
+  })
+})
+
+// 取消收藏
+router.post('/delCollection', (req, res) => {
+  const { userId, groupId, score } = req.body;
+  UserProductModel.findOne({userId, groupId}).then((item) => {
+    item.score -= Number(score);
+    item.updatedAt = now();
+    item.save()
+  })
+  CollectionModel.deleteOne({
+    userId,
+    groupId
+  }).then(() => {
+    res.send({
+      status: 0,
+      msg: '取消收藏成功'
+    })
+  }).catch(err => {
+    res.send({
+      status: 1,
+      msg: '取消收藏异常' + err
+    })
+  })
+})
+
+// 浏览商品
+router.post('/watchProd', (req, res) => {
+  const {userId, groupId, score} = req.body;
+  HistoryModel.findOne({
+    userId,
+    groupId
+  }).then(item => {
+    item.updatedAt = now();
+    item.save();
+  }).catch(() => {
+    HistoryModel.create({
+      userId,
+      groupId,
+      createdAt: now(),
+      updatedAt: now()
+    })
+  })
+  UserProductModel.findOne({userId, groupId}).then(item => {
+    item.score += Number(score)
+    item.updatedAt = now();
+    item.save();
+    res.send({
+      msg: 'updated success'
+    })
+  })
+  .catch(() => {
+    UserProductModel.create({
+      ...req.body,
+      createdAt: now(),
+      updatedAt: now()
+    })
+    res.send({
+      msg: 'created success'
+    })
+  })
+})
+
+// 获取浏览商品信息
+router.get('/browseInfo', (req, res) => {
+  const {userId} = req.query
+  HistoryModel.find({userId}).populate('groupId').then(data => {
+    data = data.sort((a, b) => {
+      if(a.updatedAt > b.updatedAt) return -1;
+      return 1
+    })
+    res.send({
+      data,
+      status: 0
+    })
+  })
+})
+
+router.post('/buyProd', (req, res) => {
+  const {userId, productList, score} = req.body;
+  if(productList && productList.length) {
+    productList.map(item => {
+      UserProductModel.findOne({userId, groupId: item.productId})
+      .then(prod => {
+        prod.score += Number(score);
+        prod.updatedAt = now()
+        prod.save();
+        res.send({
+          msg: 'updated success'
+        })
+      })
+      .catch(() => {
+        UserProductModel.create({
+          userId,
+          groupId: item.productId,
+          score: Number(score),
+          createdAt: now(),
+          updatedAt: now()
+        })
+        res.send({
+          msg: 'created success'
+        })
+      })
+    })
+  }
+  else {
+    UserProductModel.findOne({userId, groupId: productList.productId})
+      .then(prod => {
+        prod.score += Number(score);
+        prod.save();
+        res.send({
+          msg: 'updated success'
+        })
+      })
+      .catch(() => {
+        UserProductModel.create({
+          userId,
+          groupId: productList.productId,
+          score: Number(score),
+          createdAt: now(),
+          updatedAt: now()
+        })
+        res.send({
+          msg: 'created success'
+        })
+      })
+  }
+  
+})
+
+// 销量排行
+router.get('/sales', (req, res) => {
+  ProductModel.find({}).then(data => {
+    data = data.sort((a,b) => b.sales - a.sales).slice(0, 10);
+    res.send({
+      status: 0,
+      data
+    })
+  }).catch(() => {
+    res.send({
+      status: 1,
+      msg: 'err'
+    })
+  })
+})
+
+// 新品发售
+router.get('/news', (req, res) => {
+  ProductModel.find({}).then(data => {
+    data = data.sort((a,b) => {
+      if(a.createdAt > b.createdAt) return -1;
+      return 1;
+    }).slice(0, 10);
+    res.send({
+      status: 0,
+      data
+    })
+  }).catch(() => {
+    res.send({
+      status: 1,
+      msg: 'err'
+    })
+  })
+})
+
+// 推荐商品
+router.get('/recommend', async (req, res) => {
+  const {userId} = req.query;
+  let users = await UserModel.find({});
+  users = users.map(user => user._id)
+  let dataList = []
+  let temp = []
+  users.forEach(async (_id, i) => {
+    let data = await UserProductModel.find({userId: _id})
+      data.sort((a, b) => b.score - a.score);
+      if(data.length > 200) data = data.slice(0, 200);
+      temp = temp.concat(data)
+      if(i == 0) {
+
+        dataList = dataList.concat(temp);
+        let ans = userProdUtils(dataList);
+        const recommendUserService = new RecommendUserService(ans, userId, 3)
+        const result = recommendUserService.start()
+        res.send({
+          data: result,
+          status: 0
+        })
+      }
+  })
 
     
-    // populate: {
-    //    path: 'city',
-    // }
-
-
 })
 
-
+router.post('/recommendProd', (req, res) => {
+  let data = [];
+  const {prodList} = req.body;
+  prodList.map( async (_id, i) => {
+    let prod = await ProductModel.findOne({_id})
+    // console.log(prod)
+    data.push(prod)
+    if(i == prodList.length - 1) {
+      res.send({
+        data,
+        status: 0
+      })
+    }
+  })
+  
+})
 
 /**======================================================== */
 // 删除用户
@@ -796,22 +1416,7 @@ router.post('/manage/role/update', (req, res) => {
 /****
  * 模拟数据 后去可以删除
  */
-router.get('/cartList', (req, res) => {
-  // 跨域
-  var reqOrigin = req.header("origin");
- 
-  if(reqOrigin !=undefined && reqOrigin.indexOf("http://localhost:3000") > -1){
-  //设置允许 http://localhost:3000 这个域响应
-    res.header("Access-Control-Allow-Origin", "http://localhost:3000");
-    res.header("Access-Control-Allow-Methods","PUT,POST,GET,DELETE,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type,Content-Length, Authorization, Accept,X-Requested-With");
-  }
-  let data = JSON.parse(fs.readFileSync(path.join(__dirname,'../mock/cart.json'),'utf8'))
-  res.send({
-    data,
-    status: 0
-  })
-})
+
 
 router.get('/cate', (req, res) => {
   // 跨域
@@ -829,6 +1434,187 @@ router.get('/cate', (req, res) => {
     status: 0
   })
 })
+
+/**
+ * 支付宝支付api
+ */
+router.get('/aliPay', async (req, res) => {
+
+  const { orderId, totalPrice } = req.query;
+  // sdk签名
+  const AlipayFormData = require("alipay-sdk/lib/form").default;
+  const formData = new AlipayFormData();
+  formData.setMethod('get');
+  formData.addField('bizContent', {
+    outTradeNo: orderId, // 商户订单号,64个字符以内、可包含字母、数字、下划线,且不能重复
+    productCode: 'FAST_INSTANT_TRADE_PAY', // 销售产品码，与支付宝签约的产品码名称,仅支持FAST_INSTANT_TRADE_PAY
+    totalAmount: totalPrice + '', // 订单总金额，单位为元，精确到小数点后两位
+    subject: '商品', // 订单标题
+    body: '商品详情', // 订单描述
+  });
+  // 表示异步通知回调,
+  // formData.addField('notifyUrl', 'https://www.baidu.com');
+  // 付款成功的跳转页面
+  formData.addField('returnUrl', 'http://localhost:3000/#/success_pay/' + orderId);
+
+
+  let data = await alipaySdk.exec(
+    'alipay.trade.wap.pay',
+    {},
+    {
+      formData: formData
+    }, 
+  // { validateSign: true }).then(result => {
+  //   console.log('支付宝返回支付链接：',result);
+  //   res.send(result)
+  // }
+  );
+  res.send(data)
+})
+
+router.post('/queryOrderAlipay', (req, res) => {
+  let orderId=req.body.orderId
+  const AlipayFormData = require("alipay-sdk/lib/form").default;
+  const formData = new AlipayFormData();
+  formData.setMethod('get');
+  formData.addField('bizContent', {
+    orderId
+  });
+  // 通过该接口主动查询订单状态
+  const result = alipaySdk.exec(
+    'alipay.trade.query',
+    {},
+    { formData: formData },
+  );
+  axios({
+    method: 'GET',
+    url: result
+  })
+    .then(data => {
+      let r = data.data.alipay_trade_query_response;
+      if(r.code === '10000') { // 接口调用成功
+        switch(r.trade_status) {
+          case 'WAIT_BUYER_PAY':
+            res.send(
+              {
+                "success": true,
+                "message": "success",
+                "code": 200,
+                "timestamp": (new Date()).getTime(),
+                "result": {
+                  "status":0,
+                  "massage":'交易创建，等待买家付款'
+                }
+              }
+            )
+            break;
+          case 'TRADE_CLOSED':
+            res.send(
+              {
+                "success": true,
+                "message": "success",
+                "code": 200,
+                "timestamp": (new Date()).getTime(),
+                "result": {
+                  "status":1,
+                  "massage":'未付款交易超时关闭，或支付完成后全额退款'
+                }
+              }
+            )
+            break;
+          case 'TRADE_SUCCESS':
+            res.send(
+              {
+                "success": true,
+                "message": "success",
+                "code": 200,
+                "timestamp": (new Date()).getTime(),
+                "result": {
+                  "status":2,
+                  "massage":'交易支付成功'
+                }
+              }
+            )
+            break;
+          case 'TRADE_FINISHED':
+            res.send(
+              {
+                "success": true,
+                "message": "success",
+                "code": 200,
+                "timestamp": (new Date()).getTime(),
+                "result": {
+                  "status":3,
+                  "massage":'交易结束，不可退款'
+                }
+              }
+            )
+            break;
+        }
+      } else if(r.code === '40004') {
+        res.send('交易不存在');
+      }
+    })
+    .catch(err => {
+      res.json({
+        msg: '查询失败',
+        err
+      });
+    });
+
+})
+
+
+/**
+ * 将爬虫得到的数据 添加到数据库
+ * 
+ */
+router.post('/spider', (req, res) => {
+  const { list } = req.body;
+  list.map(item => {
+    ProductModel.findOne({name: item.商品名称}).then(prod => {
+      prod.groupId = prod._id.toString()
+      prod.image.unshift(item.图片地址)
+      prod.detailProduct.map(detailProd => {
+        detailProd.productId = detailProd._id.toString()
+        detailProd.price = prod.defaultPrice
+        detailProd.save()
+      })
+      prod.save()
+    })
+  })
+  res.send({
+    msg: 'success'
+  })
+})
+
+router.post('/checkdata', (req, res) => {
+  // ProductModel.deleteMany({groupId: ''}).catch((err) => {
+  //   res.send({
+  //     err
+  //   })
+  // })
+  ProductModel.find({}).then(ans => {
+    ans.forEach(item => {
+      
+      if(!item.image[0]) {
+        console.log(item)
+        item.image.shift()
+        item.save()
+      }
+    })
+  }).then(() => {
+    res.send({
+      msg: 'success'
+    })
+  }).catch(err => {
+    res.send({
+      err
+    })
+  })
+  
+})
+
 
 /*
 得到指定数组的分页信息对象

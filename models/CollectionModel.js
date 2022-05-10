@@ -14,15 +14,14 @@ const collectionSchema = new mongoose.Schema({
     // 之收藏商品的大类
     groupId: {
         type: String,
-        required: true
+        required: true,
+        ref: 'product'
     },
     createdAt: {
         type: String,
-        default: now
     },
     updatedAt: {
         type: String,
-        default: now
     }
 },
 {

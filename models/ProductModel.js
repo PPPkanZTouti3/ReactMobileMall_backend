@@ -7,13 +7,18 @@ const now = require('../utils/dateUtils')
 
 // 2.字义Schema(描述文档结构)
 const productSchema = new mongoose.Schema({
-  groupId: {type: String, required: true},
-  name: {type: String, required: true}, // 名称
+  groupId: {type: String, default: ''},
+  name: {type: String, default: ''}, // 名称
   description: String,
-  defaultprice: {type: Number, required: true}, // 小卡片上显示的价格
+  defaultPrice: {type: Number}, // 小卡片上显示的价格
   image: {type: Array, default: []}, // 总览图片
   detailProduct: [{
-    productId: {type: String, required: true},
+    _id: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: mongoose.Types.ObjectId()
+    },
+    stockNum: {type: Number, default: 139},
+    productId: {type: String, default: ''},
     price: {type: Number, required: true},
     img: {type: Array, default: []}, // 具体图片
     status: {type: Number, default: 1}, // 1 在售  0 下架
@@ -23,15 +28,23 @@ const productSchema = new mongoose.Schema({
           type: String,
           ref: 'product_attri'
         }
-      }]
+      }
+    ]
   }],
+  sales: Number,
+  tags: {
+    type: String,
+    default: ''
+  },
   createdAt: {
     type: String,
-    default: now
   },
   updatedAt: {
-      type: String,
-      default: now
+    type: String,
+  },
+  introduction: {
+    type: Array,
+    default: []
   }
 },
 {

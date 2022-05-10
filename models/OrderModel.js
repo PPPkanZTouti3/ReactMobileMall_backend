@@ -3,7 +3,6 @@
  */
 // 1.引入mongoose
 const mongoose = require('mongoose')
-const now = require('../utils/dateUtils')
 
 // 2.字义Schema(描述文档结构)
 const orderSchema = new mongoose.Schema({
@@ -21,6 +20,10 @@ const orderSchema = new mongoose.Schema({
     },
     expressCompany: String,
     expressNumber: String, // 快递单号
+    isOverTime: {
+        type: Number, 
+        default: 0 // 0 未超时 1 超时
+    },
     payStatus: { type: Number, default: 0 }, // 0待支付 1已支付，待发货 2运送中 3已完成
     // 运费
     deliveryFee: Number,
@@ -29,13 +32,12 @@ const orderSchema = new mongoose.Schema({
     totalPrice: Number,
     // 开始支付时间
     payStartTime: String,
+    payEndTime: String,
     createdAt: {
         type: String,
-        default: now
     },
     updatedAt: {
         type: String,
-        default: now
     }
 }, {
     collection: 'order'
