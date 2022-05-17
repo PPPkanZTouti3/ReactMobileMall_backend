@@ -751,7 +751,7 @@ router.post('/searchProdFunc', async (req, res) => {
       res.send({
         msg: 'updated success'
       })
-    }).catch(() => {
+    }).catch((err) => {
       UserProductModel.create({
         groupId: item.groupId,
         userId,
@@ -759,6 +759,7 @@ router.post('/searchProdFunc', async (req, res) => {
         createdAt: now(),
         updatedAt: now()
       })
+      console.log(err)
       res.send({
         msg: 'created success'
       })
@@ -769,7 +770,9 @@ router.post('/searchProdFunc', async (req, res) => {
 // 获取用户收藏列表
 router.get('/collection', (req, res) => {
   const {_id} = req.query;
+  // console.log(_id)
   CollectionModel.find({userId: _id}).populate('groupId').then(data => {
+    // console.log(data)
     res.send({
       status: 0,
       data
