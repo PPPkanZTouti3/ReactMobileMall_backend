@@ -37,7 +37,7 @@ const RecommendUserService = class RecommendUserService {
         this.similarityList.sort((a, b) => {
             return b.grade - a.grade
         })
-        // 计算目标商品
+        // 计算目标商品 去除目标用户购买过的商品
         this.getTargetGoods()
         // 此时目标商品已存在this.targetGoods中, 然后去重
         this.targetGoods = [...new Set(this.targetGoods)]
